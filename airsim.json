@@ -1,0 +1,36 @@
+{
+  "project": "corrosion_detection_then_cleaning",
+  "structure": {
+    "name": "Test Wall",
+    "type": "vertical_wall",
+    "corners_gps": {
+      "A": {
+        "lat": 33.8938898,
+        "lon": 35.5018649
+      },
+      "B": {
+        "lat": 33.8938898,
+        "lon": 35.501919
+      }
+    },
+    "dimensions_m": {
+      "width": 4.993417474113565,
+      "scan_height": 4.0
+    }
+  },
+  "scan_settings": {
+    "start_alt_m": 2.0,
+    "max_alt_m": 6.0,
+    "speed_mps": 1.0,
+    "standoff_m": 2.0,
+    "lane_spacing_m": 0.5,
+    "overshoot_m": 2.0
+  },
+  "assumptions": {
+    "corner_A_is_left_corner": true,
+    "corner_B_is_right_corner": true,
+    "width_is_computed_from_A_to_B": true,
+    "scan_side_selection": "automatic_from_current_drone_side",
+    "mavlink_frame": "LOCAL_NED"
+  }
+}
