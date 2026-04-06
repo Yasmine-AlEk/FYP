@@ -1,0 +1,202 @@
+//written on arduino ide
+
+
+#include <WiFi.h>
+#include <WiFiUdp.h>
+
+// ================= Wi-Fi settings =================
+const char* WIFI_SSID = "Drone_Network_2.4Hz";
+const char* WIFI_PASS = "12345678";
+
+// true  -> ESP32 creates its own hotspot
+// false -> ESP32 joins an existing Wi-Fi network
+const bool USE_AP_MODE = false;
+
+const uint16_t UDP_PORT = 4210;
+
+// ================= Hardware settings =================
+const int RELAY_PIN = 26;
+
+// Change this depending on your relay module:
+// true  -> relay turns ON when pin is HIGH
+// false -> relay turns ON when pin is LOW
+const bool RELAY_ACTIVE_HIGH = true;
+
+// Optional limit for safety
+const uint32_t MAX_OPEN_MS = 10000;  // 10 seconds max
+
+// ================= Globals =================
+WiFiUDP udp;
+char rxBuf[256];
+
+bool valveOpen = false;
+bool timedOpenActive = false;
+uint32_t valveCloseTime = 0;
+
+// ---------------- Helpers ----------------
+void setRelay(bool on) {
+  valveOpen = on;
+
+  if (RELAY_ACTIVE_HIGH) {
+    digitalWrite(RELAY_PIN, on ? HIGH : LOW);
+  } else {
+    digitalWrite(RELAY_PIN, on ? LOW : HIGH);
+  }
+}
+
+void replyToSender(IPAddress ip, uint16_t port, const String& msg) {
+  udp.beginPacket(ip, port);
+  udp.print(msg);
+  udp.endPacket();
+}
+
+String getDeviceIP() {
+  if (USE_AP_MODE) {
+    return WiFi.softAPIP().toString();
+  }
+  return WiFi.localIP().toString();
+}
+
+String normalize(String s) {
+  s.trim();
+  s.toUpperCase();
+  return s;
+}
+
+// ---------------- Setup ----------------
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(RELAY_PIN, OUTPUT);
+  setRelay(false);  // start safe: valve closed
+
+  if (USE_AP_MODE) {
+    WiFi.mode(WIFI_AP);
+    bool ok = WiFi.softAP(WIFI_SSID, WIFI_PASS);
+
+    Serial.println(ok ? "AP started" : "AP start FAILED");
+    Serial.print("AP IP: ");
+    Serial.println(WiFi.softAPIP());
+  } else {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+
+    Serial.print("Connecting to Wi-Fi");
+    while (WiFi.status() != WL_CONNECTED) {
+      delay(300);
+      Serial.print(".");
+    }
+    Serial.println();
+    Serial.println("Connected");
+    Serial.print("STA IP: ");
+    Serial.println(WiFi.localIP());
+  }
+
+  udp.begin(UDP_PORT);
+  Serial.print("UDP listening on port ");
+  Serial.println(UDP_PORT);
+
+  Serial.println("Commands:");
+  Serial.println("  OPEN");
+  Serial.println("  CLOSE");
+  Serial.println("  STOP");
+  Serial.println("  STATUS");
+  Serial.println("  OPEN_MS 1500");
+}
+
+// ---------------- Loop ----------------
+void loop() {
+  // non-blocking timed close
+  if (timedOpenActive && millis() >= valveCloseTime) {
+    setRelay(false);
+    timedOpenActive = false;
+    Serial.println("Timed open finished -> valve closed");
+  }
+
+  int packetSize = udp.parsePacket();
+  if (packetSize <= 0) {
+    delay(5);
+    return;
+  }
+
+  int len = udp.read(rxBuf, sizeof(rxBuf) - 1);
+  if (len <= 0) {
+    return;
+  }
+
+  rxBuf[len] = '\0';
+
+  IPAddress senderIP = udp.remoteIP();
+  uint16_t senderPort = udp.remotePort();
+
+  String raw = String(rxBuf);
+  String cmd = normalize(raw);
+
+  Serial.print("RX from ");
+  Serial.print(senderIP);
+  Serial.print(":");
+  Serial.print(senderPort);
+  Serial.print(" -> ");
+  Serial.println(raw);
+
+  // -------- Command handling --------
+  if (cmd == "OPEN") {
+    timedOpenActive = false;
+    setRelay(true);
+    replyToSender(senderIP, senderPort, "ACK_OPEN");
+    return;
+  }
+
+  if (cmd == "CLOSE") {
+    timedOpenActive = false;
+    setRelay(false);
+    replyToSender(senderIP, senderPort, "ACK_CLOSE");
+    return;
+  }
+
+  if (cmd == "STOP") {
+    timedOpenActive = false;
+    setRelay(false);
+    replyToSender(senderIP, senderPort, "ACK_STOP");
+    return;
+  }
+
+  if (cmd == "STATUS") {
+    String s = "IP=" + getDeviceIP();
+    s += " VALVE=" + String(valveOpen ? "OPEN" : "CLOSED");
+    s += " TIMED=" + String(timedOpenActive ? "YES" : "NO");
+    replyToSender(senderIP, senderPort, s);
+    return;
+  }
+
+  if (cmd.startsWith("OPEN_MS")) {
+    int sp = raw.indexOf(' ');
+    if (sp < 0) {
+      replyToSender(senderIP, senderPort, "ERR_FORMAT");
+      return;
+    }
+
+    String msStr = raw.substring(sp + 1);
+    msStr.trim();
+    long durationMs = msStr.toInt();
+
+    if (durationMs <= 0) {
+      replyToSender(senderIP, senderPort, "ERR_BAD_VALUE");
+      return;
+    }
+
+    if (durationMs > (long)MAX_OPEN_MS) {
+      replyToSender(senderIP, senderPort, "ERR_TOO_LONG");
+      return;
+    }
+
+    setRelay(true);
+    timedOpenActive = true;
+    valveCloseTime = millis() + (uint32_t)durationMs;
+
+    replyToSender(senderIP, senderPort, "ACK_OPEN_MS");
+    return;
+  }
+
+  replyToSender(senderIP, senderPort, "ERR_UNKNOWN_CMD");
+}
