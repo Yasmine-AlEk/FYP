@@ -14,7 +14,7 @@ Vec2 = Tuple[float, float]
 Vec3 = Tuple[float, float, float]  # (north, east, down)
 
 DEFAULT_DETECTIONS_JSON = "corrosion_detections.json"
-DEFAULT_CONNECTION_URL = "udp:127.0.0.1:14550"
+DEFAULT_CONNECTION_URL = "udpin:0.0.0.0:14550"
 
 # navigation / settling
 NAV_HZ = 10.0
@@ -165,27 +165,105 @@ def load_cleaning_parameters(spec: dict) -> Dict[str, float]:
 
 
 def extract_corrosion_targets_from_json(detections_payload: dict) -> List[dict]:
+    """
+    Extract cleaning targets from corrosion_detections.json.
+
+    Priority:
+    1. top-level commanded_target_ned dictionary
+    2. extra.commanded_target_ned list
+    3. actual_local_position_ned dictionary
+    4. legacy abs_local_ned list
+
+    For cleaning, commanded_target_ned is preferred because it represents the
+    planned scan location where corrosion was detected.
+    """
+
     detections = detections_payload.get("detections", [])
     targets: List[dict] = []
 
     for idx, det in enumerate(detections):
-        abs_local = det.get("abs_local_ned")
-        if abs_local is None or len(abs_local) != 3:
+        extra = det.get("extra", {}) or {}
+
+        target_xyz = None
+        target_source = None
+
+        # New preferred format: top-level commanded_target_ned dictionary
+        cmd_dict = det.get("commanded_target_ned")
+        if isinstance(cmd_dict, dict):
+            try:
+                target_xyz = (
+                    float(cmd_dict["x_north_m"]),
+                    float(cmd_dict["y_east_m"]),
+                    float(cmd_dict["z_down_m"]),
+                )
+                target_source = "commanded_target_ned"
+            except KeyError:
+                target_xyz = None
+
+        # Fallback: extra.commanded_target_ned list
+        if target_xyz is None:
+            cmd_list = extra.get("commanded_target_ned")
+            if isinstance(cmd_list, list) and len(cmd_list) == 3:
+                target_xyz = (
+                    float(cmd_list[0]),
+                    float(cmd_list[1]),
+                    float(cmd_list[2]),
+                )
+                target_source = "extra.commanded_target_ned"
+
+        # Fallback: actual_local_position_ned dictionary
+        if target_xyz is None:
+            actual_dict = det.get("actual_local_position_ned")
+            if isinstance(actual_dict, dict):
+                try:
+                    target_xyz = (
+                        float(actual_dict["x_north_m"]),
+                        float(actual_dict["y_east_m"]),
+                        float(actual_dict["z_down_m"]),
+                    )
+                    target_source = "actual_local_position_ned"
+                except KeyError:
+                    target_xyz = None
+
+        # Legacy fallback: abs_local_ned list
+        if target_xyz is None:
+            abs_local = det.get("abs_local_ned")
+            if isinstance(abs_local, list) and len(abs_local) == 3:
+                target_xyz = (
+                    float(abs_local[0]),
+                    float(abs_local[1]),
+                    float(abs_local[2]),
+                )
+                target_source = "abs_local_ned"
+
+        if target_xyz is None:
+            print(f"Skipping detection #{idx}: no valid target position found.")
             continue
 
-        extra = det.get("extra", {}) or {}
         target = {
             "id": idx,
-            "target_xyz": (float(abs_local[0]), float(abs_local[1]), float(abs_local[2])),
+            "target_xyz": target_xyz,
+            "target_source": target_source,
             "rel_ned": tuple(det.get("rel_ned", [0.0, 0.0, 0.0])),
             "timestamp_s": det.get("timestamp_s"),
             "corroded_area": extra.get("corroded_area"),
+            "corrosion_percent": extra.get("corrosion_percent"),
+            "severity_grade": extra.get("severity_grade"),
+            "vision_files": extra.get("vision_files"),
             "extra": extra,
         }
+
         targets.append(target)
 
     if not targets:
         raise RuntimeError("No valid corrosion targets found in detections JSON.")
+
+    print(f"Extracted {len(targets)} cleaning targets.")
+    for t in targets:
+        print(
+            f"  target #{t['id']} from {t['target_source']} -> "
+            f"{t['target_xyz']} | severity={t.get('severity_grade')}"
+        )
 
     return targets
 

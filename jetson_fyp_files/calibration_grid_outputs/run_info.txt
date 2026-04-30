@@ -1,0 +1,4 @@
+theta_pan_center_deg=8.0
+theta_pitch_center_deg=5.0
+pan_offsets_deg=[-2, -1, 0, 1, 2]
+pitch_offsets_deg=[-2, -1, 0, 1, 2]

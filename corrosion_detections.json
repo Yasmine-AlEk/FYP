@@ -1,0 +1,451 @@
+{
+  "detection_count": 4,
+  "detections": [
+    {
+      "rel_ned": [
+        0.0,
+        3.85,
+        -1.0
+      ],
+      "dedup_reference": "commanded_target_ned",
+      "commanded_target_ned": {
+        "x_north_m": -2.0,
+        "y_east_m": 3.35,
+        "z_down_m": -3.0
+      },
+      "actual_local_position_ned": {
+        "x_north_m": -1.9950166940689087,
+        "y_east_m": 6.427209854125977,
+        "z_down_m": -2.9040355682373047
+      },
+      "timestamp_s": 1777578048.1132834,
+      "extra": {
+        "corroded_area": null,
+        "corrosion_percent": 3.9,
+        "severity_grade": "MODERATE",
+        "severity_description": "Monitor closely",
+        "num_regions": 2,
+        "regions": [
+          {
+            "id": 1,
+            "bbox": {
+              "x": 900,
+              "y": 13,
+              "w": 257,
+              "h": 330
+            },
+            "area_pixels": 33918,
+            "centroid": {
+              "x": 1045.8,
+              "y": 161.7
+            },
+            "severity_breakdown": {
+              "fair_pixels": 33918,
+              "severe_pixels": 0
+            },
+            "dominant_severity": "fair"
+          },
+          {
+            "id": 2,
+            "bbox": {
+              "x": 825,
+              "y": 96,
+              "w": 62,
+              "h": 49
+            },
+            "area_pixels": 1993,
+            "centroid": {
+              "x": 856.0,
+              "y": 120.6
+            },
+            "severity_breakdown": {
+              "fair_pixels": 1993,
+              "severe_pixels": 0
+            },
+            "dominant_severity": "fair"
+          }
+        ],
+        "distance_mm": null,
+        "area_cm2": null,
+        "vision_files": {
+          "image": "20260501_034048_100899.jpg",
+          "json": "20260501_034048_100899.json"
+        },
+        "commanded_target_ned": [
+          -2.0,
+          3.35,
+          -3.0
+        ],
+        "vision_metrics": {
+          "total_pixels": 921600,
+          "pixel_counts": {
+            "class0": 885689,
+            "class1": 35911,
+            "class2": 0
+          },
+          "area_percent": {
+            "class1": 3.9,
+            "class2": 0.0,
+            "corroded_total": 3.9
+          },
+          "distance_mm": null,
+          "area_cm2": null,
+          "timing": {
+            "preprocess_ms": 6.93,
+            "inference_ms": 112.69,
+            "forward_pass_ms": 25.02,
+            "interpolation_ms": 0.07,
+            "classify_ms": 87.49,
+            "postprocess_ms": 67.9,
+            "total_frame_ms": 187.52,
+            "fps_capacity": 5.33
+          },
+          "gpu": {
+            "memory_allocated_mb": 36.43,
+            "device": "cuda"
+          }
+        }
+      }
+    },
+    {
+      "rel_ned": [
+        0.0,
+        3.0999999999999996,
+        -1.0
+      ],
+      "dedup_reference": "commanded_target_ned",
+      "commanded_target_ned": {
+        "x_north_m": -2.0,
+        "y_east_m": 2.5999999999999996,
+        "z_down_m": -3.0
+      },
+      "actual_local_position_ned": {
+        "x_north_m": -1.9911069869995117,
+        "y_east_m": 6.430634021759033,
+        "z_down_m": -2.9856345653533936
+      },
+      "timestamp_s": 1777578052.2835565,
+      "nearest_previous_saved_detection_m": 0.7500000000000004,
+      "extra": {
+        "corroded_area": null,
+        "corrosion_percent": 10.01,
+        "severity_grade": "HIGH",
+        "severity_description": "Schedule maintenance soon",
+        "num_regions": 1,
+        "regions": [
+          {
+            "id": 1,
+            "bbox": {
+              "x": 850,
+              "y": 66,
+              "w": 430,
+              "h": 420
+            },
+            "area_pixels": 92271,
+            "centroid": {
+              "x": 1055.0,
+              "y": 264.0
+            },
+            "severity_breakdown": {
+              "fair_pixels": 92271,
+              "severe_pixels": 0
+            },
+            "dominant_severity": "fair"
+          }
+        ],
+        "distance_mm": null,
+        "area_cm2": null,
+        "vision_files": {
+          "image": "20260501_034052_270557.jpg",
+          "json": "20260501_034052_270557.json"
+        },
+        "commanded_target_ned": [
+          -2.0,
+          2.5999999999999996,
+          -3.0
+        ],
+        "vision_metrics": {
+          "total_pixels": 921600,
+          "pixel_counts": {
+            "class0": 829329,
+            "class1": 92271,
+            "class2": 0
+          },
+          "area_percent": {
+            "class1": 10.01,
+            "class2": 0.0,
+            "corroded_total": 10.01
+          },
+          "distance_mm": null,
+          "area_cm2": null,
+          "timing": {
+            "preprocess_ms": 5.1,
+            "inference_ms": 87.5,
+            "forward_pass_ms": 27.8,
+            "interpolation_ms": 0.08,
+            "classify_ms": 59.5,
+            "postprocess_ms": 72.55,
+            "total_frame_ms": 165.15,
+            "fps_capacity": 6.06
+          },
+          "gpu": {
+            "memory_allocated_mb": 36.43,
+            "device": "cuda"
+          }
+        }
+      }
+    },
+    {
+      "rel_ned": [
+        0.0,
+        2.3500000000000005,
+        -1.0
+      ],
+      "dedup_reference": "commanded_target_ned",
+      "commanded_target_ned": {
+        "x_north_m": -2.0,
+        "y_east_m": 1.8500000000000005,
+        "z_down_m": -3.0
+      },
+      "actual_local_position_ned": {
+        "x_north_m": -1.9864556789398193,
+        "y_east_m": 6.434944152832031,
+        "z_down_m": -3.040626049041748
+      },
+      "timestamp_s": 1777578056.3477106,
+      "nearest_previous_saved_detection_m": 0.7499999999999991,
+      "extra": {
+        "corroded_area": null,
+        "corrosion_percent": 7.2,
+        "severity_grade": "MODERATE",
+        "severity_description": "Monitor closely",
+        "num_regions": 3,
+        "regions": [
+          {
+            "id": 1,
+            "bbox": {
+              "x": 845,
+              "y": 172,
+              "w": 394,
+              "h": 300
+            },
+            "area_pixels": 65421,
+            "centroid": {
+              "x": 1031.7,
+              "y": 344.4
+            },
+            "severity_breakdown": {
+              "fair_pixels": 65421,
+              "severe_pixels": 0
+            },
+            "dominant_severity": "fair"
+          },
+          {
+            "id": 3,
+            "bbox": {
+              "x": 1162,
+              "y": 495,
+              "w": 23,
+              "h": 34
+            },
+            "area_pixels": 480,
+            "centroid": {
+              "x": 1172.7,
+              "y": 510.6
+            },
+            "severity_breakdown": {
+              "fair_pixels": 480,
+              "severe_pixels": 0
+            },
+            "dominant_severity": "fair"
+          },
+          {
+            "id": 2,
+            "bbox": {
+              "x": 871,
+              "y": 470,
+              "w": 47,
+              "h": 12
+            },
+            "area_pixels": 429,
+            "centroid": {
+              "x": 895.4,
+              "y": 475.9
+            },
+            "severity_breakdown": {
+              "fair_pixels": 429,
+              "severe_pixels": 0
+            },
+            "dominant_severity": "fair"
+          }
+        ],
+        "distance_mm": null,
+        "area_cm2": null,
+        "vision_files": {
+          "image": "20260501_034056_336269.jpg",
+          "json": "20260501_034056_336269.json"
+        },
+        "commanded_target_ned": [
+          -2.0,
+          1.8500000000000005,
+          -3.0
+        ],
+        "vision_metrics": {
+          "total_pixels": 921600,
+          "pixel_counts": {
+            "class0": 855270,
+            "class1": 66330,
+            "class2": 0
+          },
+          "area_percent": {
+            "class1": 7.2,
+            "class2": 0.0,
+            "corroded_total": 7.2
+          },
+          "distance_mm": null,
+          "area_cm2": null,
+          "timing": {
+            "preprocess_ms": 4.78,
+            "inference_ms": 79.6,
+            "forward_pass_ms": 23.31,
+            "interpolation_ms": 0.07,
+            "classify_ms": 56.1,
+            "postprocess_ms": 65.14,
+            "total_frame_ms": 149.51,
+            "fps_capacity": 6.69
+          },
+          "gpu": {
+            "memory_allocated_mb": 36.43,
+            "device": "cuda"
+          }
+        }
+      }
+    },
+    {
+      "rel_ned": [
+        0.0,
+        1.1999999999999993,
+        -1.0
+      ],
+      "dedup_reference": "commanded_target_ned",
+      "commanded_target_ned": {
+        "x_north_m": -2.0,
+        "y_east_m": 0.6999999999999993,
+        "z_down_m": -3.0
+      },
+      "actual_local_position_ned": {
+        "x_north_m": -1.9826431274414062,
+        "y_east_m": 6.439949989318848,
+        "z_down_m": -3.067244291305542
+      },
+      "timestamp_s": 1777578062.766523,
+      "nearest_previous_saved_detection_m": 1.1500000000000012,
+      "extra": {
+        "corroded_area": null,
+        "corrosion_percent": 5.59,
+        "severity_grade": "MODERATE",
+        "severity_description": "Monitor closely",
+        "num_regions": 3,
+        "regions": [
+          {
+            "id": 1,
+            "bbox": {
+              "x": 843,
+              "y": 245,
+              "w": 204,
+              "h": 235
+            },
+            "area_pixels": 27258,
+            "centroid": {
+              "x": 929.2,
+              "y": 367.4
+            },
+            "severity_breakdown": {
+              "fair_pixels": 27258,
+              "severe_pixels": 0
+            },
+            "dominant_severity": "fair"
+          },
+          {
+            "id": 2,
+            "bbox": {
+              "x": 1081,
+              "y": 297,
+              "w": 162,
+              "h": 275
+            },
+            "area_pixels": 23609,
+            "centroid": {
+              "x": 1173.5,
+              "y": 429.3
+            },
+            "severity_breakdown": {
+              "fair_pixels": 23609,
+              "severe_pixels": 0
+            },
+            "dominant_severity": "fair"
+          },
+          {
+            "id": 3,
+            "bbox": {
+              "x": 1161,
+              "y": 624,
+              "w": 27,
+              "h": 35
+            },
+            "area_pixels": 614,
+            "centroid": {
+              "x": 1174.7,
+              "y": 640.9
+            },
+            "severity_breakdown": {
+              "fair_pixels": 614,
+              "severe_pixels": 0
+            },
+            "dominant_severity": "fair"
+          }
+        ],
+        "distance_mm": null,
+        "area_cm2": null,
+        "vision_files": {
+          "image": "20260501_034102_755407.jpg",
+          "json": "20260501_034102_755407.json"
+        },
+        "commanded_target_ned": [
+          -2.0,
+          0.6999999999999993,
+          -3.0
+        ],
+        "vision_metrics": {
+          "total_pixels": 921600,
+          "pixel_counts": {
+            "class0": 870119,
+            "class1": 51481,
+            "class2": 0
+          },
+          "area_percent": {
+            "class1": 5.59,
+            "class2": 0.0,
+            "corroded_total": 5.59
+          },
+          "distance_mm": null,
+          "area_cm2": null,
+          "timing": {
+            "preprocess_ms": 4.51,
+            "inference_ms": 70.97,
+            "forward_pass_ms": 26.68,
+            "interpolation_ms": 0.06,
+            "classify_ms": 44.13,
+            "postprocess_ms": 64.08,
+            "total_frame_ms": 139.56,
+            "fps_capacity": 7.17
+          },
+          "gpu": {
+            "memory_allocated_mb": 36.43,
+            "device": "cuda"
+          }
+        }
+      }
+    }
+  ]
+}
