@@ -8,8 +8,6 @@ from collections import deque
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-import cv2
-import numpy as np
 import serial
 from pymavlink import mavutil
 
@@ -52,26 +50,12 @@ DEMO_TIMING = True
 # If True, the system will not spray unless distance/yaw/height PID becomes stable.
 REQUIRE_STABLE_BEFORE_SPRAY = True
 
-# If live/saved-image segmentation fails, this can fall back to scan-time saved regions.
-# Keep False when testing the new mask + serpentine cleaning planner.
-USE_SCAN_REGIONS_FOR_DEMO = False
-
-# Run corrosion segmentation at each cleaning target using the saved scan image.
-SEGMENTATION_ENABLED = True
-SEGMENTATION_SOURCE_IMAGE_DIR = Path("realtime_outputs")
-SEGMENTATION_OUTPUT_DIR = Path("cleaning_segmentation_outputs")
-
-# The spray path planner will generate top-to-bottom serpentine points.
-# It will later be connected to the gimbal calibration.
-SPRAY_EACH_SERPENTINE_POINT = True
-SERPENTINE_POINT_SPRAY_DURATION_S = 0.5 if DEMO_TIMING else 1.0
-MAX_SERPENTINE_POINTS_PER_TARGET = None  # set to an int for short demos, e.g. 10
+# If True, use the scan-time saved mask/regions as a placeholder for cleaning segmentation.
+# The real final system should replace this with live segmentation at the target.
+USE_SCAN_REGIONS_FOR_DEMO = True
 
 # Gimbal/nozzle control is left as a hook until calibration matrix is connected.
 GIMBAL_ENABLED = False
-
-# Pump/solenoid spraying should only happen if segmentation finds corrosion points.
-REQUIRE_CORROSION_BEFORE_SPRAY = True
 
 # Return to launch after each stage.
 RTL_AFTER_EACH_STAGE = True
@@ -176,39 +160,6 @@ STAGE_ORDER = [
     "inhibitor",
 ]
 
-
-# =========================================================
-# CORROSION SEGMENTATION + SERPENTINE CONFIG
-# =========================================================
-
-# Fixed tuned HSV values from the corrosion segmentation slider screenshot.
-SEG_RESIZE_TO = (640, 480)
-SEG_HSV_LOWER = np.array([1, 96, 70], dtype=np.uint8)
-SEG_HSV_UPPER = np.array([11, 198, 255], dtype=np.uint8)
-
-SEG_USE_ENHANCE = True
-SEG_ALPHA = 1.30
-SEG_BETA = 20
-
-SEG_USE_CLAHE = True
-SEG_CLAHE_CLIP = 2.0
-
-SEG_BLUR = 5
-SEG_OPEN_ITER = 1
-SEG_CLOSE_ITER = 1
-SEG_MEDIAN_BLUR = 5
-SEG_MIN_COMPONENT_AREA = 120
-
-SEG_MERGE_GAP_X = 10
-SEG_MERGE_GAP_Y = 6
-SEG_EXPAND_RECT_PX = 8
-
-# Measured spray footprint from calibration.
-SPRAY_FOOTPRINT_AREA_PX = 311
-SPRAY_DIAMETER_PX = 19.90
-SPRAY_RADIUS_PX = SPRAY_DIAMETER_PX / 2.0
-SPRAY_OVERLAP_PCT = 30
-SPRAY_STEP_PX = max(1, int(round(SPRAY_DIAMETER_PX * (1.0 - SPRAY_OVERLAP_PCT / 100.0))))
 
 # =========================================================
 # PID CONFIG
@@ -790,609 +741,52 @@ def run_target_pid_stabilization(master, ser, target_xyz: Vec3) -> bool:
 
 
 # =========================================================
-# CORROSION SEGMENTATION HELPERS
-# =========================================================
-
-def enhance_segmentation_image(frame_bgr):
-    if not SEG_USE_ENHANCE:
-        hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
-        return hsv, frame_bgr.copy()
-
-    hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
-    h, s, v = cv2.split(hsv)
-
-    v = cv2.convertScaleAbs(v, alpha=SEG_ALPHA, beta=SEG_BETA)
-
-    if SEG_USE_CLAHE:
-        clahe = cv2.createCLAHE(clipLimit=SEG_CLAHE_CLIP, tileGridSize=(8, 8))
-        v = clahe.apply(v)
-
-    hsv_enhanced = cv2.merge([h, s, v])
-    frame_enhanced = cv2.cvtColor(hsv_enhanced, cv2.COLOR_HSV2BGR)
-    return hsv_enhanced, frame_enhanced
-
-
-def segment_corrosion_mask(hsv_enhanced):
-    mask = cv2.inRange(hsv_enhanced, SEG_HSV_LOWER, SEG_HSV_UPPER)
-
-    blur = max(1, int(SEG_BLUR))
-    if blur % 2 == 0:
-        blur += 1
-
-    if blur > 1:
-        mask = cv2.GaussianBlur(mask, (blur, blur), 0)
-        _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
-
-    kernel = np.ones((5, 5), np.uint8)
-
-    if SEG_OPEN_ITER > 0:
-        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=SEG_OPEN_ITER)
-
-    if SEG_CLOSE_ITER > 0:
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=SEG_CLOSE_ITER)
-
-    median = max(1, int(SEG_MEDIAN_BLUR))
-    if median % 2 == 0:
-        median += 1
-
-    if median > 1:
-        mask = cv2.medianBlur(mask, median)
-
-    return mask
-
-
-def get_filtered_corrosion_contours(mask):
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    filtered_mask = np.zeros_like(mask)
-    kept_contours = []
-
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area >= SEG_MIN_COMPONENT_AREA:
-            kept_contours.append(cnt)
-            cv2.drawContours(filtered_mask, [cnt], -1, 255, thickness=cv2.FILLED)
-
-    return filtered_mask, kept_contours
-
-
-def contours_to_boxes(contours):
-    boxes = []
-
-    for cnt in contours:
-        x, y, w, h = cv2.boundingRect(cnt)
-        aspect = w / float(h) if h > 0 else 999.0
-
-        if aspect >= 2.0:
-            orientation = "horizontal"
-        elif aspect <= 0.5:
-            orientation = "vertical"
-        else:
-            orientation = "blob"
-
-        boxes.append({
-            "x1": int(x),
-            "y1": int(y),
-            "x2": int(x + w - 1),
-            "y2": int(y + h - 1),
-            "w": int(w),
-            "h": int(h),
-            "orientation": orientation,
-        })
-
-    return boxes
-
-
-def box_center(box):
-    cx = (box["x1"] + box["x2"]) / 2.0
-    cy = (box["y1"] + box["y2"]) / 2.0
-    return cx, cy
-
-
-def horizontal_gap(a, b):
-    if a["x2"] < b["x1"]:
-        return b["x1"] - a["x2"]
-    if b["x2"] < a["x1"]:
-        return a["x1"] - b["x2"]
-    return 0
-
-
-def vertical_gap(a, b):
-    if a["y2"] < b["y1"]:
-        return b["y1"] - a["y2"]
-    if b["y2"] < a["y1"]:
-        return a["y1"] - b["y2"]
-    return 0
-
-
-def boxes_should_merge(a, b, gap_x, gap_y):
-    dx = horizontal_gap(a, b)
-    dy = vertical_gap(a, b)
-
-    cxa, cya = box_center(a)
-    cxb, cyb = box_center(b)
-
-    center_dx = abs(cxa - cxb)
-    center_dy = abs(cya - cyb)
-
-    oa = a["orientation"]
-    ob = b["orientation"]
-
-    if oa == "horizontal" and ob == "horizontal":
-        same_row = center_dy <= max(a["h"], b["h"])
-        return dx <= gap_x and same_row
-
-    if oa == "vertical" and ob == "vertical":
-        same_col = center_dx <= max(a["w"], b["w"])
-        return dy <= gap_y and same_col
-
-    if oa == "blob" and ob == "blob":
-        return dx <= gap_x and dy <= gap_y
-
-    if (oa == "horizontal" and ob == "blob") or (oa == "blob" and ob == "horizontal"):
-        same_row = center_dy <= max(a["h"], b["h"]) * 1.2
-        return dx <= gap_x and same_row
-
-    if (oa == "vertical" and ob == "blob") or (oa == "blob" and ob == "vertical"):
-        same_col = center_dx <= max(a["w"], b["w"]) * 1.2
-        return dy <= gap_y and same_col
-
-    return False
-
-
-def merge_two_boxes(a, b):
-    x1 = min(a["x1"], b["x1"])
-    y1 = min(a["y1"], b["y1"])
-    x2 = max(a["x2"], b["x2"])
-    y2 = max(a["y2"], b["y2"])
-
-    w = x2 - x1 + 1
-    h = y2 - y1 + 1
-    aspect = w / float(h) if h > 0 else 999.0
-
-    if aspect >= 2.0:
-        orientation = "horizontal"
-    elif aspect <= 0.5:
-        orientation = "vertical"
-    else:
-        orientation = "blob"
-
-    return {
-        "x1": int(x1),
-        "y1": int(y1),
-        "x2": int(x2),
-        "y2": int(y2),
-        "w": int(w),
-        "h": int(h),
-        "orientation": orientation,
-    }
-
-
-def merge_nearby_boxes(boxes, gap_x, gap_y):
-    if not boxes:
-        return []
-
-    current_boxes = boxes[:]
-    changed_global = True
-
-    while changed_global:
-        changed_global = False
-        used = [False] * len(current_boxes)
-        next_boxes = []
-
-        for i in range(len(current_boxes)):
-            if used[i]:
-                continue
-
-            merged_box = current_boxes[i]
-            used[i] = True
-
-            changed_local = True
-            while changed_local:
-                changed_local = False
-
-                for j in range(len(current_boxes)):
-                    if used[j]:
-                        continue
-
-                    if boxes_should_merge(merged_box, current_boxes[j], gap_x, gap_y):
-                        merged_box = merge_two_boxes(merged_box, current_boxes[j])
-                        used[j] = True
-                        changed_local = True
-                        changed_global = True
-
-            next_boxes.append(merged_box)
-
-        current_boxes = next_boxes
-
-    return current_boxes
-
-
-def expand_boxes(boxes, expand_px, img_w, img_h):
-    expanded = []
-
-    for i, box in enumerate(boxes):
-        x1 = max(0, box["x1"] - expand_px)
-        y1 = max(0, box["y1"] - expand_px)
-        x2 = min(img_w - 1, box["x2"] + expand_px)
-        y2 = min(img_h - 1, box["y2"] + expand_px)
-
-        expanded.append({
-            "id": int(i),
-            "orientation": box["orientation"],
-            "raw_bbox": {
-                "x1": int(box["x1"]),
-                "y1": int(box["y1"]),
-                "x2": int(box["x2"]),
-                "y2": int(box["y2"]),
-                "w": int(box["w"]),
-                "h": int(box["h"]),
-            },
-            "expanded_bbox": {
-                "x1": int(x1),
-                "y1": int(y1),
-                "x2": int(x2),
-                "y2": int(y2),
-                "w": int(x2 - x1 + 1),
-                "h": int(y2 - y1 + 1),
-            },
-        })
-
-    expanded.sort(key=lambda r: (r["expanded_bbox"]["y1"], r["expanded_bbox"]["x1"]))
-    for new_id, rect in enumerate(expanded):
-        rect["id"] = int(new_id)
-    return expanded
-
-
-def mask_to_pixels_xy(mask):
-    ys, xs = np.where(mask > 0)
-    return [[int(x), int(y)] for x, y in zip(xs, ys)]
-
-
-def mask_to_rle(mask):
-    flat = (mask.flatten() > 0).astype(np.uint8)
-    if flat.size == 0:
-        return []
-
-    rle = []
-    current = int(flat[0])
-    count = 1
-
-    for value in flat[1:]:
-        value = int(value)
-        if value == current:
-            count += 1
-        else:
-            rle.append([current, count])
-            current = value
-            count = 1
-
-    rle.append([current, count])
-    return rle
-
-
-def generate_serpentine_points(mask, rectangles, step_px, spray_radius_px):
-    """
-    Generate cleaning points from the corrosion mask.
-
-    Required pattern inside each corrosion rectangle:
-      row 1: top-left  -> top-right
-      row 2: right     -> left
-      row 3: left      -> right
-
-    The planner scans from top to bottom. For every sampled row, it finds
-    actual positive corrosion pixels and samples them with step_px spacing.
-    A vertical band of +/- spray_radius_px is checked so thin corrosion is
-    not missed when the row center falls slightly above/below the mask.
-    """
-    h, w = mask.shape[:2]
-    step = max(1, int(round(step_px)))
-    band_r = max(1, int(round(spray_radius_px)))
-
-    points = []
-    point_id = 0
-
-    for rect in rectangles:
-        bbox = rect["expanded_bbox"]
-        x1 = int(bbox["x1"])
-        y1 = int(bbox["y1"])
-        x2 = int(bbox["x2"])
-        y2 = int(bbox["y2"])
-
-        row_centers = list(range(y1, y2 + 1, step))
-        if row_centers and row_centers[-1] != y2:
-            row_centers.append(y2)
-        elif not row_centers:
-            row_centers = [y1]
-
-        serp_row_index = 0
-
-        for y in row_centers:
-            y = int(y)
-            y0 = max(0, y - band_r)
-            y1_band = min(h - 1, y + band_r)
-            x0 = max(0, x1)
-            x1_lim = min(w - 1, x2)
-
-            band = mask[y0:y1_band + 1, x0:x1_lim + 1]
-            if band.size == 0 or not np.any(band > 0):
-                continue
-
-            active_cols_local = np.where(np.any(band > 0, axis=0))[0]
-            if active_cols_local.size == 0:
-                continue
-
-            active_xs = active_cols_local + x0
-            active_xs = np.sort(active_xs)
-
-            sampled_xs = []
-            last_x = None
-            for x in active_xs:
-                x = int(x)
-                if last_x is None or x - last_x >= step:
-                    sampled_xs.append(x)
-                    last_x = x
-
-            rightmost = int(active_xs[-1])
-            if sampled_xs and sampled_xs[-1] != rightmost and rightmost - sampled_xs[-1] >= max(2, step // 2):
-                sampled_xs.append(rightmost)
-
-            if serp_row_index % 2 == 0:
-                ordered_xs = sampled_xs
-                direction = "left_to_right"
-            else:
-                ordered_xs = list(reversed(sampled_xs))
-                direction = "right_to_left"
-
-            for col_idx, x in enumerate(ordered_xs):
-                points.append({
-                    "point_id": int(point_id),
-                    "rect_id": int(rect["id"]),
-                    "row_index": int(serp_row_index),
-                    "col_index": int(col_idx),
-                    "direction": direction,
-                    "x_px": int(x),
-                    "y_px": int(y),
-                })
-                point_id += 1
-
-            serp_row_index += 1
-
-    return points
-
-
-def draw_segmentation_overlay(frame_enhanced, corrosion_mask, kept_contours, rectangles, serpentine_points):
-    overlay = frame_enhanced.copy()
-
-    mask_colored = np.zeros_like(frame_enhanced)
-    mask_colored[:, :, 2] = corrosion_mask
-    overlay = cv2.addWeighted(overlay, 0.80, mask_colored, 0.45, 0)
-
-    cv2.drawContours(overlay, kept_contours, -1, (0, 255, 255), 2)
-
-    for rect in rectangles:
-        bbox = rect["expanded_bbox"]
-        x1 = bbox["x1"]
-        y1 = bbox["y1"]
-        x2 = bbox["x2"]
-        y2 = bbox["y2"]
-        cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(
-            overlay,
-            f"Rect {rect['id']}",
-            (x1, max(18, y1 - 6)),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            (0, 255, 0),
-            2,
-            cv2.LINE_AA,
-        )
-
-    points_by_rect = {}
-    for p in serpentine_points:
-        points_by_rect.setdefault(p["rect_id"], []).append(p)
-
-    for _rect_id, pts in points_by_rect.items():
-        for i, p in enumerate(pts):
-            x = int(p["x_px"])
-            y = int(p["y_px"])
-            cv2.circle(overlay, (x, y), 3, (255, 0, 255), -1)
-            if i > 0:
-                prev = pts[i - 1]
-                cv2.line(
-                    overlay,
-                    (int(prev["x_px"]), int(prev["y_px"])),
-                    (x, y),
-                    (255, 0, 255),
-                    1,
-                )
-
-    corrosion_ratio = np.sum(corrosion_mask > 0) / max(1, corrosion_mask.size) * 100.0
-    cv2.putText(overlay, f"Corrosion coverage: {corrosion_ratio:.2f}%", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
-    cv2.putText(overlay, f"Serpentine points: {len(serpentine_points)}", (10, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2, cv2.LINE_AA)
-    return overlay
-
-
-def find_target_segmentation_image(target: dict) -> Optional[Path]:
-    vision_files = target.get("vision_files") or {}
-    image_name = vision_files.get("image") if isinstance(vision_files, dict) else None
-
-    candidates = []
-    if image_name:
-        candidates.append(Path(image_name))
-        candidates.append(SEGMENTATION_SOURCE_IMAGE_DIR / image_name)
-
-    raw_detection = target.get("raw_detection") or {}
-    extra = target.get("extra") or raw_detection.get("extra") or {}
-    extra_files = extra.get("vision_files") or {}
-    extra_image = extra_files.get("image") if isinstance(extra_files, dict) else None
-    if extra_image and extra_image != image_name:
-        candidates.append(Path(extra_image))
-        candidates.append(SEGMENTATION_SOURCE_IMAGE_DIR / extra_image)
-
-    for candidate in candidates:
-        if candidate.exists() and candidate.is_file():
-            return candidate
-
-    return None
-
-
-def process_cleaning_segmentation_image(image_path: Path, target_id: int, stage_key: str, pass_number: int) -> dict:
-    frame = cv2.imread(str(image_path))
-    if frame is None:
-        raise RuntimeError(f"Could not read segmentation image: {image_path}")
-
-    original_h, original_w = frame.shape[:2]
-    frame = cv2.resize(frame, SEG_RESIZE_TO)
-
-    hsv_enhanced, frame_enhanced = enhance_segmentation_image(frame)
-    raw_mask = segment_corrosion_mask(hsv_enhanced)
-    filtered_mask, kept_contours = get_filtered_corrosion_contours(raw_mask)
-
-    boxes = contours_to_boxes(kept_contours)
-    merged_boxes = merge_nearby_boxes(boxes, SEG_MERGE_GAP_X, SEG_MERGE_GAP_Y)
-
-    img_h, img_w = filtered_mask.shape[:2]
-    rectangles = expand_boxes(merged_boxes, SEG_EXPAND_RECT_PX, img_w, img_h)
-
-    serpentine_points = generate_serpentine_points(mask=filtered_mask, rectangles=rectangles, step_px=SPRAY_STEP_PX, spray_radius_px=SPRAY_RADIUS_PX)
-
-    overlay = draw_segmentation_overlay(frame_enhanced=frame_enhanced, corrosion_mask=filtered_mask, kept_contours=kept_contours, rectangles=rectangles, serpentine_points=serpentine_points)
-
-    SEGMENTATION_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    stem = f"stage_{stage_key}_pass_{pass_number:02d}_target_{target_id:03d}"
-    mask_path = SEGMENTATION_OUTPUT_DIR / f"{stem}_mask.png"
-    overlay_path = SEGMENTATION_OUTPUT_DIR / f"{stem}_overlay.jpg"
-    json_path = SEGMENTATION_OUTPUT_DIR / f"{stem}_serpentine.json"
-
-    cv2.imwrite(str(mask_path), filtered_mask)
-    cv2.imwrite(str(overlay_path), overlay)
-
-    positive_pixels = mask_to_pixels_xy(filtered_mask)
-    payload = {
-        "target_id": int(target_id),
-        "stage_key": stage_key,
-        "pass_number": int(pass_number),
-        "source_image": str(image_path),
-        "original_image_size": {"width": int(original_w), "height": int(original_h)},
-        "processed_image_size": {"width": int(img_w), "height": int(img_h)},
-        "detected": bool(len(serpentine_points) > 0),
-        "threshold_settings": {
-            "hsv_lower": SEG_HSV_LOWER.tolist(),
-            "hsv_upper": SEG_HSV_UPPER.tolist(),
-            "use_enhance": SEG_USE_ENHANCE,
-            "alpha": SEG_ALPHA,
-            "beta": SEG_BETA,
-            "use_clahe": SEG_USE_CLAHE,
-            "clahe_clip": SEG_CLAHE_CLIP,
-            "blur": SEG_BLUR,
-            "open_iter": SEG_OPEN_ITER,
-            "close_iter": SEG_CLOSE_ITER,
-            "median_blur": SEG_MEDIAN_BLUR,
-            "min_component_area": SEG_MIN_COMPONENT_AREA,
-            "merge_gap_x": SEG_MERGE_GAP_X,
-            "merge_gap_y": SEG_MERGE_GAP_Y,
-            "expand_rect_px": SEG_EXPAND_RECT_PX,
-        },
-        "spray_footprint": {
-            "area_px": SPRAY_FOOTPRINT_AREA_PX,
-            "equivalent_diameter_px": SPRAY_DIAMETER_PX,
-            "radius_px": SPRAY_RADIUS_PX,
-            "overlap_pct": SPRAY_OVERLAP_PCT,
-            "step_px": SPRAY_STEP_PX,
-            "meaning": "Serpentine rows move top-to-bottom; row directions alternate left_to_right then right_to_left.",
-        },
-        "mask": {
-            "encoding": "positive_pixels_xy_and_rle_row_major",
-            "positive_pixel_count": int(len(positive_pixels)),
-            "mask_pixels_xy": positive_pixels,
-            "rle_row_major": mask_to_rle(filtered_mask),
-        },
-        "rectangles": rectangles,
-        "serpentine_points_px": serpentine_points,
-        "outputs": {
-            "mask_image": str(mask_path),
-            "overlay_image": str(overlay_path),
-            "json": str(json_path),
-        },
-    }
-
-    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    return payload
-
-
-# =========================================================
 # SEGMENTATION / GIMBAL / SPRAY HOOKS
 # =========================================================
 
-def run_cleaning_segmentation(target: dict, stage_key: str, pass_number: int) -> Optional[dict]:
+def run_cleaning_segmentation(target: dict) -> Optional[dict]:
     """
-    Runs fixed-threshold corrosion segmentation for the cleaning stage.
+    Placeholder for live cleaning segmentation.
 
-    Current source image:
-      - uses the saved scan-time image stored in target['vision_files']['image'].
-
-    Final live version later:
-      - replace find_target_segmentation_image() with a fresh camera capture at the target.
+    Current implementation uses saved scan-time regions for demo.
+    Replace this with live camera segmentation at the cleaning target.
     """
-    if not SEGMENTATION_ENABLED:
-        print("[Segment] Segmentation disabled.")
+    regions = target.get("regions", []) or []
+
+    if not regions:
+        print("[Segment] No saved regions available.")
         return None
 
-    image_path = find_target_segmentation_image(target)
-    if image_path is None:
-        print("[Segment] No saved image found for this target.")
-        if USE_SCAN_REGIONS_FOR_DEMO:
-            regions = target.get("regions", []) or []
-            if regions:
-                largest = max(regions, key=lambda r: r.get("area_pixels", 0))
-                centroid = largest.get("centroid", {})
-                return {
-                    "detected": True,
-                    "source": "saved_scan_regions_fallback",
-                    "centroid_px": (centroid.get("x"), centroid.get("y")),
-                    "bbox": largest.get("bbox"),
-                    "serpentine_points_px": [],
-                }
-        return None
+    largest = max(regions, key=lambda r: r.get("area_pixels", 0))
+    centroid = largest.get("centroid", {})
 
-    try:
-        result = process_cleaning_segmentation_image(image_path=image_path, target_id=int(target["id"]), stage_key=stage_key, pass_number=pass_number)
-    except Exception as e:
-        print(f"[Segment] Segmentation failed: {e}")
-        return None
+    result = {
+        "source": "saved_scan_regions_demo",
+        "bbox": largest.get("bbox"),
+        "centroid_px": (centroid.get("x"), centroid.get("y")),
+        "area_pixels": largest.get("area_pixels"),
+        "dominant_severity": largest.get("dominant_severity"),
+    }
 
-    print(f"[Segment] source={image_path} | detected={result['detected']} | mask_px={result['mask']['positive_pixel_count']} | rectangles={len(result['rectangles'])} | serpentine_points={len(result['serpentine_points_px'])}")
-    print(f"[Segment] JSON saved: {result['outputs']['json']}")
+    print(
+        f"[Segment] Using saved scan region: centroid={result['centroid_px']} | "
+        f"area_px={result['area_pixels']} | severity={result['dominant_severity']}"
+    )
     return result
 
 
-def aim_gimbal_to_pixel(point: dict) -> bool:
-    x_px = point.get("x_px")
-    y_px = point.get("y_px")
+def aim_gimbal_to_segment(segment: Optional[dict]) -> bool:
+    if segment is None:
+        print("[Gimbal] No segment to aim at.")
+        return False
 
     if not GIMBAL_ENABLED:
-        print(f"[Gimbal] Placeholder: would aim hose to pixel x={x_px}, y={y_px}.")
+        print("[Gimbal] Placeholder: would aim hose to mask/centroid now.")
         return True
 
     # TODO: connect calibration matrix + servo_angle_control.py here.
-    # Expected future flow:
-    #   pixel error from center -> calibration matrix -> pan/tilt angles -> MAVLink servo PWM.
     print("[Gimbal] TODO: calibrated gimbal control not connected yet.")
     return False
-
-
-def aim_gimbal_to_segment(segment: Optional[dict]) -> bool:
-    if segment is None or not segment.get("detected", False):
-        print("[Gimbal] No detected corrosion segment to aim at.")
-        return False
-
-    points = segment.get("serpentine_points_px") or []
-    if not points:
-        print("[Gimbal] Segment has no serpentine points.")
-        return False
-
-    return aim_gimbal_to_pixel(points[0])
 
 
 def send_esp32_command(command: str) -> Optional[str]:
@@ -1417,48 +811,15 @@ def send_esp32_command(command: str) -> Optional[str]:
         sock.close()
 
 
-def spray_one_serpentine_point(point: dict, duration_s: float) -> bool:
-    aimed = aim_gimbal_to_pixel(point)
-    if not aimed:
-        print("[Spray] Could not aim gimbal for this point.")
-        return False
-
-    send_esp32_command("s")
-    time.sleep(float(duration_s))
-    send_esp32_command("x")
-    return True
-
-
 def spray_target(stage: dict, target: dict, segment: Optional[dict]) -> bool:
     print(f"[Spray] Stage: {stage['label']} | Solution: {stage['solution']}")
-
-    if REQUIRE_CORROSION_BEFORE_SPRAY and (segment is None or not segment.get("detected", False)):
-        print("[Spray] No corrosion detected by cleaning segmentation. Skipping pump/solenoid.")
-        return False
-
-    points = [] if segment is None else (segment.get("serpentine_points_px") or [])
-
-    if SPRAY_EACH_SERPENTINE_POINT and points:
-        if MAX_SERPENTINE_POINTS_PER_TARGET is not None:
-            points = points[:MAX_SERPENTINE_POINTS_PER_TARGET]
-
-        print(f"[Spray] Spraying {len(points)} serpentine points | point duration={SERPENTINE_POINT_SPRAY_DURATION_S:.2f}s")
-
-        sprayed_any = False
-        for point in points:
-            print(f"[Spray] point_id={point.get('point_id')} | row={point.get('row_index')} | dir={point.get('direction')} | x={point.get('x_px')} y={point.get('y_px')}")
-            if spray_one_serpentine_point(point, SERPENTINE_POINT_SPRAY_DURATION_S):
-                sprayed_any = True
-
-        print(f"[Spray] Done target #{target['id']} | sprayed_any={sprayed_any}")
-        return sprayed_any
+    print(f"[Spray] Duration: {stage['spray_duration_s']:.1f}s")
 
     aimed = aim_gimbal_to_segment(segment)
     if not aimed:
         print("[Spray] Could not aim gimbal. Skipping spray.")
         return False
 
-    print(f"[Spray] Fallback single spray duration: {stage['spray_duration_s']:.1f}s")
     send_esp32_command("s")
     time.sleep(float(stage["spray_duration_s"]))
     send_esp32_command("x")
@@ -1544,7 +905,7 @@ def visit_and_treat_targets_once(
             sprayed = False
             segment = None
         else:
-            segment = run_cleaning_segmentation(target, stage_key=stage_key, pass_number=pass_number)
+            segment = run_cleaning_segmentation(target)
             sprayed = spray_target(stage, target, segment)
 
         event = {
